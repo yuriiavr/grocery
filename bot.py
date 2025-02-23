@@ -163,7 +163,7 @@ def remove_item(update: Update, context: CallbackContext):
     query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
     list_items(update, context)
 
-def list_groups_callback(update: Update, context: CallbackContext):
+def list_groups(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     user_id = str(query.from_user.id)
