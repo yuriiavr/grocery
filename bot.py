@@ -188,8 +188,10 @@ def main():
     dp.add_handler(CommandHandler("create_group", create_group))
     dp.add_handler(CommandHandler("join_group", join_group))
     dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
-    dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
+    dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
+    dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
     dp.add_handler(CallbackQueryHandler(list_groups, pattern="groups"))
+    dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
     updater.start_polling()
