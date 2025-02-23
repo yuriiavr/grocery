@@ -36,7 +36,8 @@ def set_bot_commands(updater):
         BotCommand("clear", "Очистити список"),
         BotCommand("groups", "Переглянути ваші групи"),
         BotCommand("create_group", "Створити нову групу"),
-        BotCommand("join_group", "Приєднатися до групи")
+        BotCommand("join_group", "Приєднатися до групи"),
+        BotCommand("check_group", "Активна група")
     ]
     updater.bot.set_my_commands(commands)
 
@@ -90,6 +91,16 @@ def join_group(update: Update, context: CallbackContext):
         query.edit_message_text(text)
     else:
         update.message.reply_text(text)
+
+def set_active_group(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+
+    group_code = query.data.split("_")[2]
+    context.user_data["active_group"] = group_code
+
+    query.edit_message_text(f"✅ Ви працюєте з групою `{group_code}`", parse_mode="Markdown")
+
 
 def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
@@ -195,6 +206,12 @@ def list_groups(update: Update, context: CallbackContext):
     else:
         update.message.reply_text(text, reply_markup=reply_markup if user_groups else None)
 
+def check_active_group(update: Update, context: CallbackContext):
+    active_group = context.user_data.get("active_group")
+    if active_group:
+        update.message.reply_text(f"📂 Активна група: `{active_group}`", parse_mode="Markdown")
+    else:
+        update.message.reply_text("❌ Ви не вибрали групу. Використовуйте /groups.")
 
 def create_group_callback(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -228,6 +245,8 @@ def main():
     dp.add_handler(CallbackQueryHandler(list_groups, pattern="groups"))
     dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
     dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
+    dp.add_handler(CallbackQueryHandler(set_active_group, pattern="set_group_.*"))
+    dp.add_handler(CommandHandler("check_group", check_active_group))
     dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
