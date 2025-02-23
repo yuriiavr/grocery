@@ -163,17 +163,35 @@ def remove_item(update: Update, context: CallbackContext):
     query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
     list_items(update, context)
 
-def list_groups(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
+def list_groups_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    user_id = str(query.from_user.id)
     user_groups = data["user_groups"].get(user_id, [])
 
     if not user_groups:
-        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
+        query.edit_message_text("ℹ️ Ви ще не приєдналися до жодної групи.")
         return
 
     keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
+
+    query.edit_message_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
+
+def create_group_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    create_group(update, context)
+
+def join_group_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    join_group(update, context)
+
+def list_groups_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    list_groups(update, context)
 
 def main():
     updater = Updater(TOKEN, use_context=True)
@@ -188,9 +206,9 @@ def main():
     dp.add_handler(CommandHandler("create_group", create_group))
     dp.add_handler(CommandHandler("join_group", join_group))
     dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
-    dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
-    dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
-    dp.add_handler(CallbackQueryHandler(list_groups, pattern="groups"))
+    dp.add_handler(CallbackQueryHandler(create_group_callback, pattern="create_group"))
+    dp.add_handler(CallbackQueryHandler(join_group_callback, pattern="join_group"))
+    dp.add_handler(CallbackQueryHandler(list_groups_callback, pattern="groups"))
     dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
