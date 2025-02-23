@@ -1,35 +1,53 @@
 import os
-import json
 import random
+import psycopg2
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ ПОМИЛКА: Не знайдено TELEGRAM_BOT_TOKEN у змінних середовища!")
+    raise ValueError("Не знайдено TELEGRAM_BOT_TOKEN у змінних середовища!")
 
-DATA_FILE = "shopping_groups.json"
+def get_conn():
+    return psycopg2.connect(os.getenv("DATABASE_URL"), sslmode='require')
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return {"groups": {}, "user_groups": {}, "personal_lists": {}, "group_names": {}}
-    return {"groups": {}, "user_groups": {}, "personal_lists": {}, "group_names": {}}
-
-def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-data = load_data()
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS groups (
+        group_code VARCHAR(255) PRIMARY KEY,
+        group_name TEXT
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_groups (
+        user_id VARCHAR(255),
+        group_code VARCHAR(255),
+        UNIQUE (user_id, group_code)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS group_items (
+        group_code VARCHAR(255),
+        item TEXT
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS personal_lists (
+        user_id VARCHAR(255),
+        item TEXT
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def generate_group_code():
     return str(random.randint(100000, 999999))
 
 def set_bot_commands(updater):
-    commands = [
+    cmds = [
         BotCommand("start", "Головна"),
         BotCommand("list", "Переглянути список"),
         BotCommand("clear", "Очистити список"),
@@ -38,202 +56,258 @@ def set_bot_commands(updater):
         BotCommand("join_group", "Приєднатися до групи"),
         BotCommand("check_group", "Активна група")
     ]
-    updater.bot.set_my_commands(commands)
+    updater.bot.set_my_commands(cmds)
 
 def start(update: Update, context: CallbackContext):
     context.user_data.clear()
-    keyboard = [
+    kbd = [
         [InlineKeyboardButton("🧍 Особистий список", callback_data="personal")],
         [InlineKeyboardButton("👥 Створити групу", callback_data="create_group")],
         [InlineKeyboardButton("🔗 Приєднатися до групи", callback_data="join_group")],
         [InlineKeyboardButton("📂 Мої групи", callback_data="groups")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("Оберіть опцію:", reply_markup=reply_markup)
+    update.message.reply_text("Оберіть опцію:", reply_markup=InlineKeyboardMarkup(kbd))
 
 def select_personal_list(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    user_id = str(query.from_user.id)
+    q = update.callback_query
+    q.answer()
+    uid = str(q.from_user.id)
     context.user_data["active_group"] = None
-    context.user_data["personal_list"] = user_id
-    data["personal_lists"].setdefault(user_id, [])
-    save_data()
-    query.edit_message_text("✅ Ви використовуєте *особистий список*. Надсилайте товари у чат.", parse_mode="Markdown")
+    context.user_data["personal_list"] = uid
+    q.edit_message_text("Ви використовуєте особистий список. Надсилайте товари.")
 
 def ask_group_name(update: Update, context: CallbackContext):
     context.user_data["waiting_for_group_name"] = True
     context.user_data["active_group"] = None
-    text = "Введіть назву нової групи:"
+    txt = "Введіть назву нової групи:"
     if update.callback_query:
-        query = update.callback_query
-        query.answer()
-        query.edit_message_text(text)
+        q = update.callback_query
+        q.answer()
+        q.edit_message_text(txt)
     else:
-        update.message.reply_text(text)
+        update.message.reply_text(txt)
 
 def finish_group_creation(update: Update, context: CallbackContext, group_name: str):
-    user_id = str(update.effective_user.id)
-    group_code = generate_group_code()
-    data["groups"][group_code] = []
-    data["user_groups"].setdefault(user_id, []).append(group_code)
-    data["group_names"][group_code] = group_name
-    save_data()
-    context.user_data["active_group"] = group_code
-    update.message.reply_text(
-        f"✅ Групу \"{group_name}\" створено!\nКод для приєднання: `{group_code}`\nЦя група тепер встановлена як активна.",
-        parse_mode="Markdown"
-    )
+    uid = str(update.effective_user.id)
+    code = generate_group_code()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO groups (group_code, group_name) VALUES (%s, %s)", (code, group_name))
+    cur.execute("INSERT INTO user_groups (user_id, group_code) VALUES (%s, %s)", (uid, code))
+    conn.commit()
+    cur.close()
+    conn.close()
+    context.user_data["active_group"] = code
+    update.message.reply_text(f"Групу «{group_name}» створено!\nКод: {code}\nВстановлено як активну.")
 
 def join_group(update: Update, context: CallbackContext):
-    text = "✍ Введіть код групи, щоб приєднатися:"
     context.user_data["waiting_for_group_code"] = True
+    txt = "Введіть код групи:"
     if update.callback_query:
-        query = update.callback_query
-        query.answer()
-        query.edit_message_text(text)
+        q = update.callback_query
+        q.answer()
+        q.edit_message_text(txt)
     else:
-        update.message.reply_text(text)
+        update.message.reply_text(txt)
 
 def set_active_group(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    group_code = query.data.split("_")[2]
-    context.user_data["active_group"] = group_code
-    group_name = data["group_names"].get(group_code, group_code)
-    query.edit_message_text(f"✅ Ви працюєте з групою: {group_name}")
+    q = update.callback_query
+    q.answer()
+    code = q.data.split("_")[2]
+    context.user_data["active_group"] = code
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT group_name FROM groups WHERE group_code=%s", (code,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    name = row[0] if row else code
+    q.edit_message_text(f"Ви працюєте з групою: {name}")
 
 def handle_text(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    text = update.message.text.strip()
+    uid = str(update.message.from_user.id)
+    txt = update.message.text.strip()
     if context.user_data.get("waiting_for_group_name"):
-        group_name = text
         context.user_data["waiting_for_group_name"] = False
-        finish_group_creation(update, context, group_name)
+        finish_group_creation(update, context, txt)
         return
     if context.user_data.get("waiting_for_group_code"):
-        if text in data["groups"]:
-            if text not in data["user_groups"].get(user_id, []):
-                data["user_groups"].setdefault(user_id, []).append(text)
-                context.user_data["active_group"] = text
-                save_data()
-                group_name = data["group_names"].get(text, text)
-                update.message.reply_text(f"✅ Ви приєдналися до групи \"{group_name}\"!")
-            else:
-                update.message.reply_text("ℹ️ Ви вже в цій групі!")
-        else:
-            update.message.reply_text("❌ Код групи не знайдено. Перевірте ще раз.")
         context.user_data["waiting_for_group_code"] = False
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM groups WHERE group_code=%s", (txt,))
+        exists = cur.fetchone()
+        if exists:
+            cur.execute("SELECT 1 FROM user_groups WHERE user_id=%s AND group_code=%s", (uid, txt))
+            already = cur.fetchone()
+            if not already:
+                cur.execute("INSERT INTO user_groups (user_id, group_code) VALUES (%s, %s)", (uid, txt))
+                context.user_data["active_group"] = txt
+                cur.execute("SELECT group_name FROM groups WHERE group_code=%s", (txt,))
+                r = cur.fetchone()
+                name = r[0] if r else txt
+                update.message.reply_text(f"Ви приєдналися до групи «{name}»!")
+            else:
+                update.message.reply_text("Ви вже в цій групі!")
+        else:
+            update.message.reply_text("Код групи не знайдено.")
+        conn.commit()
+        cur.close()
+        conn.close()
         return
-    active_group = context.user_data.get("active_group")
-    personal_list = context.user_data.get("personal_list")
-    if active_group:
-        data["groups"][active_group].append(text.capitalize())
-        save_data()
-        update.message.reply_text(f"✅ Додано до групового списку: {text.capitalize()}")
-    elif personal_list:
-        data["personal_lists"].setdefault(user_id, []).append(text.capitalize())
-        save_data()
-        update.message.reply_text(f"✅ Додано у ваш особистий список: {text.capitalize()}")
+    code = context.user_data.get("active_group")
+    plist = context.user_data.get("personal_list")
+    if code:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO group_items (group_code, item) VALUES (%s, %s)", (code, txt.capitalize()))
+        conn.commit()
+        cur.close()
+        conn.close()
+        update.message.reply_text("Додано до групового списку.")
+    elif plist:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO personal_lists (user_id, item) VALUES (%s, %s)", (uid, txt.capitalize()))
+        conn.commit()
+        cur.close()
+        conn.close()
+        update.message.reply_text("Додано у ваш особистий список.")
     else:
-        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
+        update.message.reply_text("Ви не вибрали список. Введіть /start.")
 
 def list_items(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    active_group = context.user_data.get("active_group")
-    personal_list = context.user_data.get("personal_list")
-    if active_group:
-        shopping_list = data["groups"].get(active_group, [])
-        group_name = data["group_names"].get(active_group, active_group)
-        list_title = f"🛒 Список покупок групи \"{group_name}\":"
-    elif personal_list:
-        shopping_list = data["personal_lists"].get(user_id, [])
-        list_title = "🛒 Ваш особистий список:"
+    uid = str(update.message.from_user.id)
+    code = context.user_data.get("active_group")
+    plist = context.user_data.get("personal_list")
+    conn = get_conn()
+    cur = conn.cursor()
+    if code:
+        cur.execute("SELECT group_name FROM groups WHERE group_code=%s", (code,))
+        row = cur.fetchone()
+        name = row[0] if row else code
+        cur.execute("SELECT item FROM group_items WHERE group_code=%s", (code,))
+        items = [r[0] for r in cur.fetchall()]
+        t = f"Список покупок групи «{name}»:"
+        if not items:
+            update.message.reply_text("Список порожній.")
+            cur.close()
+            conn.close()
+            return
+        kb = [[InlineKeyboardButton(f"🗑 {i}", callback_data=f"remove_{code}_{i}")] for i in items]
+        update.message.reply_text(t, reply_markup=InlineKeyboardMarkup(kb))
+    elif plist:
+        cur.execute("SELECT item FROM personal_lists WHERE user_id=%s", (uid,))
+        items = [r[0] for r in cur.fetchall()]
+        if not items:
+            update.message.reply_text("Список порожній.")
+            cur.close()
+            conn.close()
+            return
+        kb = [[InlineKeyboardButton(f"🗑 {i}", callback_data=f"remove_{uid}_{i}")] for i in items]
+        update.message.reply_text("Ваш особистий список:", reply_markup=InlineKeyboardMarkup(kb))
     else:
-        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
-        return
-    if not shopping_list:
-        update.message.reply_text("📭 Список покупок порожній.")
-        return
-    keyboard = [
-        [InlineKeyboardButton(f"🗑 {item}", callback_data=f"remove_{active_group or user_id}_{item}")]
-        for item in shopping_list
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text(list_title, reply_markup=reply_markup, parse_mode="Markdown")
+        update.message.reply_text("Ви не вибрали список. Введіть /start.")
+    cur.close()
+    conn.close()
 
 def clear_list(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    active_group = context.user_data.get("active_group")
-    personal_list = context.user_data.get("personal_list")
-    if active_group:
-        data["groups"][active_group] = []
-    elif personal_list:
-        data["personal_lists"][user_id] = []
+    uid = str(update.message.from_user.id)
+    code = context.user_data.get("active_group")
+    plist = context.user_data.get("personal_list")
+    conn = get_conn()
+    cur = conn.cursor()
+    if code:
+        cur.execute("DELETE FROM group_items WHERE group_code=%s", (code,))
+        update.message.reply_text("Список очищено.")
+    elif plist:
+        cur.execute("DELETE FROM personal_lists WHERE user_id=%s", (uid,))
+        update.message.reply_text("Список очищено.")
     else:
-        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
+        update.message.reply_text("Ви не вибрали список.")
+        cur.close()
+        conn.close()
         return
-    save_data()
-    update.message.reply_text("🧹 Список очищено.")
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def remove_item(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    data_parts = query.data.split("_")
-    list_id = data_parts[1]
-    item_to_remove = "_".join(data_parts[2:])
-    if list_id in data["groups"] and item_to_remove in data["groups"][list_id]:
-        data["groups"][list_id].remove(item_to_remove)
-    elif list_id in data["personal_lists"] and item_to_remove in data["personal_lists"][list_id]:
-        data["personal_lists"][list_id].remove(item_to_remove)
-    save_data()
-    query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
+    q = update.callback_query
+    q.answer()
+    parts = q.data.split("_")
+    list_id = parts[1]
+    item = "_".join(parts[2:])
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM group_items WHERE group_code=%s AND item=%s", (list_id, item))
+    cur.execute("DELETE FROM personal_lists WHERE user_id=%s AND item=%s", (list_id, item))
+    conn.commit()
+    cur.close()
+    conn.close()
+    q.edit_message_text(f"Видалено: {item}")
     list_items(update, context)
 
 def list_groups(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    user_groups = data["user_groups"].get(user_id, [])
-    if not user_groups:
-        text = "ℹ️ Ви ще не приєдналися до жодної групи."
-        reply_markup = None
-    else:
-        keyboard = []
-        for code in user_groups:
-            group_name = data["group_names"].get(code, code)
-            keyboard.append([InlineKeyboardButton(f"📌 {group_name}", callback_data=f"set_group_{code}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        text = "🔹 Виберіть групу для роботи:"
+    uid = str(update.effective_user.id)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT group_code FROM user_groups WHERE user_id=%s", (uid,))
+    codes = [r[0] for r in cur.fetchall()]
+    if not codes:
+        text = "Ви ще не приєдналися до жодної групи."
+        if update.callback_query:
+            update.callback_query.edit_message_text(text)
+        else:
+            update.message.reply_text(text)
+        cur.close()
+        conn.close()
+        return
+    kb = []
+    for c in codes:
+        cur.execute("SELECT group_name FROM groups WHERE group_code=%s", (c,))
+        row = cur.fetchone()
+        name = row[0] if row else c
+        kb.append([InlineKeyboardButton(f"📌 {name}", callback_data=f"set_group_{c}")])
+    text = "Виберіть групу:"
     if update.callback_query:
-        query = update.callback_query
-        query.answer()
-        query.edit_message_text(text, reply_markup=reply_markup if user_groups else None)
+        update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
     else:
-        update.message.reply_text(text, reply_markup=reply_markup if user_groups else None)
+        update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
+    cur.close()
+    conn.close()
 
 def check_active_group(update: Update, context: CallbackContext):
-    active_group = context.user_data.get("active_group")
-    if active_group:
-        group_name = data["group_names"].get(active_group, active_group)
-        update.message.reply_text(f"📂 Активна група: `{group_name}`", parse_mode="Markdown")
-    else:
-        update.message.reply_text("❌ Ви не вибрали групу. Використовуйте /groups.")
+    code = context.user_data.get("active_group")
+    if not code:
+        update.message.reply_text("Ви не вибрали групу.")
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT group_name FROM groups WHERE group_code=%s", (code,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    name = row[0] if row else code
+    update.message.reply_text(f"Активна група: {name}")
 
 def create_group_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
+    q = update.callback_query
+    q.answer()
     ask_group_name(update, context)
 
 def join_group_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
+    q = update.callback_query
+    q.answer()
     join_group(update, context)
 
 def list_groups_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
+    q = update.callback_query
+    q.answer()
     list_groups(update, context)
 
 def main():
+    init_db()
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
     set_bot_commands(updater)
