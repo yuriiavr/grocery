@@ -105,25 +105,6 @@ def handle_text(update: Update, context: CallbackContext):
     else:
         update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
 
-def list_groups(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    user_groups = data["user_groups"].get(user_id, [])
-
-    if not user_groups:
-        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
-        return
-
-    keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
-
-def set_active_group(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    group_code = query.data.split("_")[2]
-    context.user_data["active_group"] = group_code
-    query.edit_message_text(f"✅ Ви працюєте з групою `{group_code}`", parse_mode="Markdown")
-
 def list_items(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     active_group = context.user_data.get("active_group")
@@ -145,6 +126,34 @@ def list_items(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("🛒 *Список покупок:*", reply_markup=reply_markup, parse_mode="Markdown")
 
+def clear_list(update: Update, context: CallbackContext):
+    user_id = str(update.message.from_user.id)
+    active_group = context.user_data.get("active_group")
+    personal_list = context.user_data.get("personal_list")
+
+    if active_group:
+        data["groups"][active_group] = []
+    elif personal_list:
+        data["personal_lists"][user_id] = []
+    else:
+        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
+        return
+
+    save_data()
+    update.message.reply_text("🧹 Список очищено.")
+
+def list_groups(update: Update, context: CallbackContext):
+    user_id = str(update.message.from_user.id)
+    user_groups = data["user_groups"].get(user_id, [])
+
+    if not user_groups:
+        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
+        return
+
+    keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
+
 def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -158,7 +167,6 @@ def main():
     dp.add_handler(CommandHandler("create_group", create_group))
     dp.add_handler(CommandHandler("join_group", join_group))
     dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
-    dp.add_handler(CallbackQueryHandler(set_active_group, pattern="set_group_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
     updater.start_polling()
