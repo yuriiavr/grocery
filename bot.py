@@ -41,6 +41,7 @@ def set_bot_commands(updater):
     updater.bot.set_my_commands(commands)
 
 def start(update: Update, context: CallbackContext):
+    context.user_data.clear()
     keyboard = [
         [InlineKeyboardButton("🧍 Особистий список", callback_data="personal")],
         [InlineKeyboardButton("👥 Створити групу", callback_data="create_group")],
@@ -48,6 +49,16 @@ def start(update: Update, context: CallbackContext):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("Оберіть опцію:", reply_markup=reply_markup)
+
+def select_personal_list(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    user_id = str(query.from_user.id)
+    context.user_data["active_group"] = None
+    context.user_data["personal_list"] = user_id
+    data["personal_lists"].setdefault(user_id, [])
+    save_data()
+    query.edit_message_text("✅ Ви використовуєте *особистий список*. Надсилайте товари у чат.", parse_mode="Markdown")
 
 def create_group(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -80,42 +91,31 @@ def handle_text(update: Update, context: CallbackContext):
         return
 
     active_group = context.user_data.get("active_group")
+    personal_list = context.user_data.get("personal_list")
+
     if active_group:
         data["groups"][active_group].append(text.capitalize())
         save_data()
-        update.message.reply_text(f"✅ Додано: {text.capitalize()}")
-    else:
+        update.message.reply_text(f"✅ Додано до групового списку: {text.capitalize()}")
+    elif personal_list:
         data["personal_lists"].setdefault(user_id, []).append(text.capitalize())
         save_data()
         update.message.reply_text(f"✅ Додано у ваш особистий список: {text.capitalize()}")
-
-def list_groups(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    user_groups = data["user_groups"].get(user_id, [])
-
-    if not user_groups:
-        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
-        return
-
-    keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
-
-def set_active_group(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    group_code = query.data.split("_")[2]
-    context.user_data["active_group"] = group_code
-    query.edit_message_text(f"✅ Ви працюєте з групою `{group_code}`", parse_mode="Markdown")
+    else:
+        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
 
 def list_items(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     active_group = context.user_data.get("active_group")
+    personal_list = context.user_data.get("personal_list")
 
     if active_group:
         shopping_list = data["groups"].get(active_group, [])
-    else:
+    elif personal_list:
         shopping_list = data["personal_lists"].get(user_id, [])
+    else:
+        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
+        return
 
     if not shopping_list:
         update.message.reply_text("📭 Список покупок порожній.")
@@ -144,11 +144,15 @@ def remove_item(update: Update, context: CallbackContext):
 def clear_list(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     active_group = context.user_data.get("active_group")
+    personal_list = context.user_data.get("personal_list")
 
     if active_group:
         data["groups"][active_group] = []
-    else:
+    elif personal_list:
         data["personal_lists"][user_id] = []
+    else:
+        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
+        return
 
     save_data()
     update.message.reply_text("🧹 Список очищено.")
@@ -160,12 +164,11 @@ def main():
     set_bot_commands(updater)
 
     dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("groups", list_groups))
     dp.add_handler(CommandHandler("list", list_items))
     dp.add_handler(CommandHandler("clear", clear_list))
+    dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
     dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
     dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
-    dp.add_handler(CallbackQueryHandler(set_active_group, pattern="set_group_.*"))
     dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
