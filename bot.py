@@ -17,8 +17,8 @@ def load_data():
             try:
                 return json.load(f)
             except json.JSONDecodeError:
-                return {"groups": {}, "user_groups": {}}
-    return {"groups": {}, "user_groups": {}}
+                return {"groups": {}, "user_groups": {}, "personal_lists": {}}
+    return {"groups": {}, "user_groups": {}, "personal_lists": {}}
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -85,7 +85,9 @@ def handle_text(update: Update, context: CallbackContext):
         save_data()
         update.message.reply_text(f"✅ Додано: {text.capitalize()}")
     else:
-        update.message.reply_text("❌ Спочатку оберіть групу за допомогою команди /groups.")
+        data["personal_lists"].setdefault(user_id, []).append(text.capitalize())
+        save_data()
+        update.message.reply_text(f"✅ Додано у ваш особистий список: {text.capitalize()}")
 
 def list_groups(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
@@ -107,17 +109,19 @@ def set_active_group(update: Update, context: CallbackContext):
     query.edit_message_text(f"✅ Ви працюєте з групою `{group_code}`", parse_mode="Markdown")
 
 def list_items(update: Update, context: CallbackContext):
+    user_id = str(update.message.from_user.id)
     active_group = context.user_data.get("active_group")
-    if not active_group:
-        update.message.reply_text("❌ Ви не обрали групу. Використайте /groups, щоб вибрати.")
-        return
 
-    shopping_list = data["groups"].get(active_group, [])
+    if active_group:
+        shopping_list = data["groups"].get(active_group, [])
+    else:
+        shopping_list = data["personal_lists"].get(user_id, [])
+
     if not shopping_list:
         update.message.reply_text("📭 Список покупок порожній.")
         return
 
-    keyboard = [[InlineKeyboardButton("🗑", callback_data=f"remove_{active_group}_{item}")] for item in shopping_list]
+    keyboard = [[InlineKeyboardButton("🗑", callback_data=f"remove_{active_group or user_id}_{item}")] for item in shopping_list]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("🛒 *Список покупок:*", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -125,15 +129,29 @@ def remove_item(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     data_parts = query.data.split("_")
-    group_code = data_parts[1]
+    list_id = data_parts[1]
     item_to_remove = data_parts[2]
 
-    if group_code in data["groups"] and item_to_remove in data["groups"][group_code]:
-        data["groups"][group_code].remove(item_to_remove)
-        save_data()
-        query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
-        text, reply_markup = list_items(update, context)
-        query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    if list_id in data["groups"] and item_to_remove in data["groups"][list_id]:
+        data["groups"][list_id].remove(item_to_remove)
+    elif list_id in data["personal_lists"] and item_to_remove in data["personal_lists"][list_id]:
+        data["personal_lists"][list_id].remove(item_to_remove)
+
+    save_data()
+    query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
+    list_items(update, context)
+
+def clear_list(update: Update, context: CallbackContext):
+    user_id = str(update.message.from_user.id)
+    active_group = context.user_data.get("active_group")
+
+    if active_group:
+        data["groups"][active_group] = []
+    else:
+        data["personal_lists"][user_id] = []
+
+    save_data()
+    update.message.reply_text("🧹 Список очищено.")
 
 def main():
     updater = Updater(TOKEN, use_context=True)
@@ -144,6 +162,7 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("groups", list_groups))
     dp.add_handler(CommandHandler("list", list_items))
+    dp.add_handler(CommandHandler("clear", clear_list))
     dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
     dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
     dp.add_handler(CallbackQueryHandler(set_active_group, pattern="set_group_.*"))
