@@ -145,14 +145,20 @@ def clear_list(update: Update, context: CallbackContext):
 def remove_item(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
+    
     data_parts = query.data.split("_")
     list_id = data_parts[1]
-    item_to_remove = data_parts[2]
+    item_to_remove = "_".join(data_parts[2:])  # Виправлено для правильного оброблення назв із пробілами
 
     if list_id in data["groups"] and item_to_remove in data["groups"][list_id]:
         data["groups"][list_id].remove(item_to_remove)
     elif list_id in data["personal_lists"] and item_to_remove in data["personal_lists"][list_id]:
         data["personal_lists"][list_id].remove(item_to_remove)
+
+    save_data()
+    query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
+
+    list_items(update, context)
 
 def list_groups(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
