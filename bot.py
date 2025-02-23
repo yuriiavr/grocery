@@ -121,9 +121,11 @@ def list_items(update: Update, context: CallbackContext):
         update.message.reply_text("📭 Список покупок порожній.")
         return
 
-    keyboard = [[InlineKeyboardButton("🗑", callback_data=f"remove_{active_group or user_id}_{item}")] for item in shopping_list]
+    keyboard = [[InlineKeyboardButton(f"🗑 {item}", callback_data=f"remove_{active_group or user_id}_{item}")] for item in shopping_list]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     update.message.reply_text("🛒 *Список покупок:*", reply_markup=reply_markup, parse_mode="Markdown")
+
 
 def remove_item(update: Update, context: CallbackContext):
     query = update.callback_query
