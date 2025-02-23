@@ -1,5 +1,12 @@
+import os
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+
+# Отримуємо токен з оточення
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("❌ ПОМИЛКА: Не знайдено TELEGRAM_BOT_TOKEN у змінних середовища!")
 
 # Глобальний список для зберігання покупок
 shopping_list = []
@@ -15,31 +22,30 @@ def add_item(update: Update, context: CallbackContext):
     item = update.message.text.strip()
     if item:  # Переконуємося, що повідомлення не порожнє
         shopping_list.append(item)
-        update.message.reply_text(f"Додано: {item}\nЗагалом у списку: {len(shopping_list)} предметів.")
+        update.message.reply_text(f"✅ Додано: {item}\n📌 У списку: {len(shopping_list)} предметів.")
     else:
-        update.message.reply_text("Введіть коректну назву товару.")
+        update.message.reply_text("⚠ Введіть коректну назву товару.")
 
 def list_items(update: Update, context: CallbackContext):
     if shopping_list:
-        text = "Список покупок:\n" + "\n".join(f"- {item}" for item in shopping_list)
-        update.message.reply_text(text)
+        text = "🛒 *Список покупок:*\n" + "\n".join(f"- {item}" for item in shopping_list)
+        update.message.reply_text(text, parse_mode="Markdown")
     else:
-        update.message.reply_text("Список покупок порожній.")
+        update.message.reply_text("📭 Список покупок порожній.")
 
 def clear_list(update: Update, context: CallbackContext):
     global shopping_list
     shopping_list = []
-    update.message.reply_text("Список покупок очищено.")
+    update.message.reply_text("🧹 Список покупок очищено.")
 
 def main():
-    # Замініть 'YOUR_TELEGRAM_BOT_TOKEN' на отриманий токен від BotFather
-    updater = Updater("YOUR_TELEGRAM_BOT_TOKEN", use_context=True)
+    # Запускаємо бота з правильним токеном
+    updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("list", list_items))
     dp.add_handler(CommandHandler("clear", clear_list))
-    # Якщо повідомлення не є командою, додаємо його до списку покупок
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, add_item))
 
     updater.start_polling()
