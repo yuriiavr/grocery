@@ -62,19 +62,19 @@ def select_personal_list(update: Update, context: CallbackContext):
     query.edit_message_text("✅ Ви використовуєте *особистий список*. Надсилайте товари у чат.", parse_mode="Markdown")
 
 def create_group(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    user_id = str(query.from_user.id)
+    user_id = str(update.message.from_user.id)
     group_code = generate_group_code()
-    data["groups"][group_code] = []
-    data["user_groups"].setdefault(user_id, []).append(group_code)
-    save_data()
-    query.edit_message_text(f"✅ Група створена! Код для приєднання: `{group_code}`", parse_mode="Markdown")
+
+    if group_code not in data["groups"]:
+        data["groups"][group_code] = []
+        data["user_groups"].setdefault(user_id, []).append(group_code)
+        save_data()
+        update.message.reply_text(f"✅ Група створена! Код для приєднання: `{group_code}`", parse_mode="Markdown")
+    else:
+        update.message.reply_text("⚠️ Помилка при створенні групи. Спробуйте ще раз.")
 
 def join_group(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    update.effective_message.reply_text("✍ Введіть код групи, щоб приєднатися:")
+    update.message.reply_text("✍ Введіть код групи, щоб приєднатися:")
     context.user_data["waiting_for_group_code"] = True
 
 def handle_text(update: Update, context: CallbackContext):
@@ -83,10 +83,13 @@ def handle_text(update: Update, context: CallbackContext):
 
     if context.user_data.get("waiting_for_group_code"):
         if text in data["groups"]:
-            data["user_groups"].setdefault(user_id, []).append(text)
-            context.user_data["active_group"] = text  
-            save_data()
-            update.message.reply_text(f"✅ Ви приєдналися до групи `{text}`!")
+            if text not in data["user_groups"].get(user_id, []):  
+                data["user_groups"].setdefault(user_id, []).append(text)
+                context.user_data["active_group"] = text  
+                save_data()
+                update.message.reply_text(f"✅ Ви приєдналися до групи `{text}`!", parse_mode="Markdown")
+            else:
+                update.message.reply_text("ℹ️ Ви вже в цій групі!")
         else:
             update.message.reply_text("❌ Код групи не знайдено. Перевірте ще раз.")
         context.user_data["waiting_for_group_code"] = False
