@@ -84,8 +84,9 @@ def handle_text(update: Update, context: CallbackContext):
     if context.user_data.get("waiting_for_group_code"):
         if text in data["groups"]:
             data["user_groups"].setdefault(user_id, []).append(text)
+            context.user_data["active_group"] = text  
             save_data()
-            update.message.reply_text(f"✅ Ви приєдналися до групи {text}!")
+            update.message.reply_text(f"✅ Ви приєдналися до групи `{text}`!")
         else:
             update.message.reply_text("❌ Код групи не знайдено. Перевірте ще раз.")
         context.user_data["waiting_for_group_code"] = False
@@ -126,29 +127,13 @@ def list_items(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("🛒 *Список покупок:*", reply_markup=reply_markup, parse_mode="Markdown")
 
-def clear_list(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
-    active_group = context.user_data.get("active_group")
-    personal_list = context.user_data.get("personal_list")
-
-    if active_group:
-        data["groups"][active_group] = []
-    elif personal_list:
-        data["personal_lists"][user_id] = []
-    else:
-        update.message.reply_text("❌ Ви не вибрали список. Введіть /start, щоб вибрати.")
-        return
-
-    save_data()
-    update.message.reply_text("🧹 Список очищено.")
-    
 def remove_item(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     
     data_parts = query.data.split("_")
     list_id = data_parts[1]
-    item_to_remove = "_".join(data_parts[2:])  # Виправлено для правильного оброблення назв із пробілами
+    item_to_remove = "_".join(data_parts[2:])
 
     if list_id in data["groups"] and item_to_remove in data["groups"][list_id]:
         data["groups"][list_id].remove(item_to_remove)
@@ -157,7 +142,6 @@ def remove_item(update: Update, context: CallbackContext):
 
     save_data()
     query.edit_message_text(f"🗑 Видалено: {item_to_remove}")
-
     list_items(update, context)
 
 def list_groups(update: Update, context: CallbackContext):
@@ -185,6 +169,8 @@ def main():
     dp.add_handler(CommandHandler("create_group", create_group))
     dp.add_handler(CommandHandler("join_group", join_group))
     dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
+    dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
+    dp.add_handler(CallbackQueryHandler(list_groups, pattern="groups"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
     updater.start_polling()
