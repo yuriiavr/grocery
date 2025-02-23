@@ -164,19 +164,17 @@ def remove_item(update: Update, context: CallbackContext):
     list_items(update, context)
 
 def list_groups(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
-    user_id = str(query.from_user.id)
+    user_id = str(update.message.from_user.id)
     user_groups = data["user_groups"].get(user_id, [])
 
     if not user_groups:
-        query.edit_message_text("ℹ️ Ви ще не приєдналися до жодної групи.")
+        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
         return
 
     keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    query.edit_message_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
+    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
 
 def create_group_callback(update: Update, context: CallbackContext):
     query = update.callback_query
