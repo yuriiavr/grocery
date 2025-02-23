@@ -62,20 +62,34 @@ def select_personal_list(update: Update, context: CallbackContext):
     query.edit_message_text("✅ Ви використовуєте *особистий список*. Надсилайте товари у чат.", parse_mode="Markdown")
 
 def create_group(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
+    user_id = str(update.effective_user.id)
     group_code = generate_group_code()
 
     if group_code not in data["groups"]:
         data["groups"][group_code] = []
         data["user_groups"].setdefault(user_id, []).append(group_code)
         save_data()
-        update.message.reply_text(f"✅ Група створена! Код для приєднання: `{group_code}`", parse_mode="Markdown")
+        text = f"✅ Група створена! Код для приєднання: `{group_code}`"
     else:
-        update.message.reply_text("⚠️ Помилка при створенні групи. Спробуйте ще раз.")
+        text = "⚠️ Помилка при створенні групи. Спробуйте ще раз."
+
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+        query.edit_message_text(text, parse_mode="Markdown")
+    else:
+        update.message.reply_text(text, parse_mode="Markdown")
 
 def join_group(update: Update, context: CallbackContext):
-    update.message.reply_text("✍ Введіть код групи, щоб приєднатися:")
+    text = "✍ Введіть код групи, щоб приєднатися:"
     context.user_data["waiting_for_group_code"] = True
+
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+        query.edit_message_text(text)
+    else:
+        update.message.reply_text(text)
 
 def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
@@ -164,17 +178,23 @@ def remove_item(update: Update, context: CallbackContext):
     list_items(update, context)
 
 def list_groups(update: Update, context: CallbackContext):
-    user_id = str(update.message.from_user.id)
+    user_id = str(update.effective_user.id)
     user_groups = data["user_groups"].get(user_id, [])
 
     if not user_groups:
-        update.message.reply_text("ℹ️ Ви ще не приєдналися до жодної групи.")
-        return
+        text = "ℹ️ Ви ще не приєдналися до жодної групи."
+    else:
+        keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        text = "🔹 Виберіть групу для роботи:"
 
-    keyboard = [[InlineKeyboardButton(f"📌 {code}", callback_data=f"set_group_{code}")] for code in user_groups]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+        query.edit_message_text(text, reply_markup=reply_markup if user_groups else None)
+    else:
+        update.message.reply_text(text, reply_markup=reply_markup if user_groups else None)
 
-    update.message.reply_text("🔹 Виберіть групу для роботи:", reply_markup=reply_markup)
 
 def create_group_callback(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -200,13 +220,14 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("list", list_items))
     dp.add_handler(CommandHandler("clear", clear_list))
+    dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("groups", list_groups))
     dp.add_handler(CommandHandler("create_group", create_group))
     dp.add_handler(CommandHandler("join_group", join_group))
     dp.add_handler(CallbackQueryHandler(select_personal_list, pattern="personal"))
-    dp.add_handler(CallbackQueryHandler(create_group_callback, pattern="create_group"))
-    dp.add_handler(CallbackQueryHandler(join_group_callback, pattern="join_group"))
-    dp.add_handler(CallbackQueryHandler(list_groups_callback, pattern="groups"))
+    dp.add_handler(CallbackQueryHandler(list_groups, pattern="groups"))
+    dp.add_handler(CallbackQueryHandler(create_group, pattern="create_group"))
+    dp.add_handler(CallbackQueryHandler(join_group, pattern="join_group"))
     dp.add_handler(CallbackQueryHandler(remove_item, pattern="remove_.*"))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
